@@ -1,12 +1,12 @@
 {
   "RunContext": {
     "InboundContainer": "dllstuff-inbound",
-    "InboundBlobName": "InputBlob.json",
+    "InboundBlobName": "InboundBlob.json",
     "OutboundContainer": "dllstuff-outbound",
     "OutboundBlobPrefix": "dllstuff-",
     "OutboundBlobSuffix": ".json",
     "DLLName": "c:\\Windows\\System32\\powrprof.dll",
     "FunctionName": "IsPwrHibernateAllowed",
-    "DllPresentInInboundContainer": "powrprof.dll"
+    "DllNameInBlobStorage": "powrprof.dll"
   }
 }
