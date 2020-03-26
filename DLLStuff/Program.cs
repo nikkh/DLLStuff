@@ -22,7 +22,7 @@ namespace DLLStuff
       
 
         static void Main(string[] args)
-        {
+        { 
             
             Console.WriteLine($"{DateTime.Now.ToString()} Welcome to Nick's DLL Experiments");
             string power_dllName = @"c:\Windows\System32\powrprof.dll";

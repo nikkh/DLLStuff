@@ -7,7 +7,7 @@ FROM mcr.microsoft.com/dotnet/core/runtime:3.1-nanoserver-1809 AS base
 WORKDIR /app
 
 FROM mcr.microsoft.com/dotnet/core/sdk:3.1-nanoserver-1809 AS build
-WORKDIR /src
+WORKDIR /src 
 COPY ["DLLStuff/DLLStuff.csproj", "DLLStuff/"]
 RUN dotnet restore "DLLStuff/DLLStuff.csproj"
 COPY . .
