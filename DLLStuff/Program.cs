@@ -142,9 +142,9 @@ namespace DLLStuff
                 if (hModule == IntPtr.Zero)
                 {
                     int errorCode = Marshal.GetLastWin32Error();
-                    throw new Exception($"Failed to find load library {dllName} (ErrorCode: {errorCode})");
+                    throw new Exception($"Failed to find load library {dllFileName} (ErrorCode: {errorCode})");
                 }
-                Console.WriteLine($"{DateTime.Now.ToString()} library {dllName} was loaded sucessfully. hModule={hModule}");
+                Console.WriteLine($"{DateTime.Now.ToString()} library {dllFileName} was loaded sucessfully. hModule={hModule}");
 
                 IntPtr funcaddr = GetProcAddress(hModule, functionName);
                 if (funcaddr == IntPtr.Zero)
