@@ -339,3 +339,4 @@ ASALocalRun/
 # BeatPulse healthcheck temp database
 healthchecksdb
 /DLLStuff/local.settings.json
+/DLLStuff/Properties/launchSettings.json
