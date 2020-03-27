@@ -32,7 +32,8 @@ namespace DLLStuff
         static async Task Main(string[] args)
         {
             Console.WriteLine($"{DateTime.Now.ToString()} Welcome to Nick's DLL Experiments");
-
+            bool downloadDll = false;
+            string dllLoadPath = "";
             var configBuilder = new ConfigurationBuilder()
                .SetBasePath(Directory.GetCurrentDirectory())
                .AddJsonFile("local.settings.json", optional: true, reloadOnChange: true)
@@ -45,6 +46,7 @@ namespace DLLStuff
                 var inboundContainerName = configuration["RunContext:InboundContainer"];
                 var outboundContainerName = configuration["RunContext:OutboundContainer"];
                 var dllName = configuration["RunContext:DLLName"];
+                dllLoadPath = dllName;
                 var functionName = configuration["RunContext:FunctionName"];
                 var inboundBlobName = configuration["RunContext:InboundBlobName"];
                 var outboundBlobPrefix = configuration["RunContext:OutboundBlobPrefix"];
@@ -67,6 +69,8 @@ namespace DLLStuff
                     Console.ForegroundColor = ConsoleColor.Yellow;
                     Console.WriteLine($"There is apparently a dll in {inboundContainerName}. I'll deal with that later!");
                     Console.ForegroundColor = currentColour;
+                    downloadDll = true;
+
                 }
                 // Some stuff with blob storage
                 CloudBlobClient blobClient;
@@ -103,48 +107,54 @@ namespace DLLStuff
                 }
 
                 // some stuff with local storage
-                string dllFileName;
-                try
+                if (downloadDll)
                 {
-                    Console.WriteLine($"Current directory={Directory.GetCurrentDirectory()}");
-                    var directoryToCreate = $"{Directory.GetCurrentDirectory()}\\dll";
-                    Directory.CreateDirectory(directoryToCreate);
-                    Console.WriteLine($"directory {directoryToCreate} was created");
-                    dllFileName = $"{directoryToCreate}\\{dllNameInBlobStorage}";
-                    var dllBlob = inboundContainer.GetBlockBlobReference(dllNameInBlobStorage);
-                    await dllBlob.FetchAttributesAsync();
-                    Console.WriteLine($"Blob {dllNameInBlobStorage} in container {inboundContainerName} is {dllBlob.Properties.Length} bytes");
-                    var memoryStream = new MemoryStream();
-                    await dllBlob.DownloadToStreamAsync(memoryStream);
-                    using (memoryStream)
+                    Console.WriteLine($"Downloading DLL...");
+                    string dllFileName;
+                    try
                     {
-                        var fileStream = File.Create(dllFileName);
-                        memoryStream.Position = 0;
-                        memoryStream.CopyTo(fileStream);
-                        fileStream.Close();
+                        Console.WriteLine($"Current directory={Directory.GetCurrentDirectory()}");
+                        var directoryToCreate = $"{Directory.GetCurrentDirectory()}\\dll";
+                        Directory.CreateDirectory(directoryToCreate);
+                        Console.WriteLine($"directory {directoryToCreate} was created");
+                        dllFileName = $"{directoryToCreate}\\{dllNameInBlobStorage}";
+                        var dllBlob = inboundContainer.GetBlockBlobReference(dllNameInBlobStorage);
+                        await dllBlob.FetchAttributesAsync();
+                        Console.WriteLine($"Blob {dllNameInBlobStorage} in container {inboundContainerName} is {dllBlob.Properties.Length} bytes");
+                        var memoryStream = new MemoryStream();
+                        await dllBlob.DownloadToStreamAsync(memoryStream);
+                        using (memoryStream)
+                        {
+                            var fileStream = File.Create(dllFileName);
+                            memoryStream.Position = 0;
+                            memoryStream.CopyTo(fileStream);
+                            fileStream.Close();
+                        }
+                        Console.WriteLine($"{dllNameInBlobStorage} was downloaded to local file system {directoryToCreate}");
+                        Console.WriteLine($"Directrory Listing:");
+                        var files = Directory.GetFiles(directoryToCreate);
+                        foreach (var fileName in files)
+                        {
+                            var fileInfo = new FileInfo($"{fileName}");
+                            Console.WriteLine($"Name={fileInfo.Name}, length={fileInfo.Length}");
+                        }
+                        dllLoadPath = dllFileName;
                     }
-                    Console.WriteLine($"{dllName} was downloaded to local file system {directoryToCreate}");
-                    Console.WriteLine($"Directrory Listing:");
-                    var files = Directory.GetFiles(directoryToCreate);
-                    foreach (var fileName in files)
+                    catch (Exception e)
                     {
-                        var fileInfo = new FileInfo($"{fileName}");
-                        Console.WriteLine($"Name={fileInfo.Name}, length={fileInfo.Length}");
+                        throw new Exception($"Error processing local storage {e.Message}", e);
                     }
                 }
-                catch (Exception e)
-                {
-                    throw new Exception($"Error processing local storage {e.Message}", e);
-                }
+
+
                 // call a function in the DLL
-                // IntPtr hModule = LoadLibrary(dllName);
-                IntPtr hModule = LoadLibrary(dllFileName);
+                IntPtr hModule = LoadLibrary(dllLoadPath);
                 if (hModule == IntPtr.Zero)
                 {
                     int errorCode = Marshal.GetLastWin32Error();
-                    throw new Exception($"Failed to find load library {dllFileName} (ErrorCode: {errorCode})");
+                    throw new Exception($"Failed to load library {dllLoadPath} (ErrorCode: {errorCode})");
                 }
-                Console.WriteLine($"{DateTime.Now.ToString()} library {dllFileName} was loaded sucessfully. hModule={hModule}");
+                Console.WriteLine($"{DateTime.Now.ToString()} library {dllLoadPath} was loaded sucessfully. hModule={hModule}");
 
                 IntPtr funcaddr = GetProcAddress(hModule, functionName);
                 if (funcaddr == IntPtr.Zero)
@@ -152,7 +162,7 @@ namespace DLLStuff
                     int errorCode = Marshal.GetLastWin32Error();
                     throw new Exception($"Failed to find function {functionName} (ErrorCode: {errorCode})");
                 }
-                Console.WriteLine($"{DateTime.Now.ToString()} function {functionName} found in library {dllName} address={funcaddr}");
+                Console.WriteLine($"{DateTime.Now.ToString()} function {functionName} found in library {dllLoadPath} address={funcaddr}");
 
                 IsHibernateAllowed isHibernateAllowed = Marshal.GetDelegateForFunctionPointer(funcaddr, typeof(IsHibernateAllowed)) as IsHibernateAllowed;
                 bool hibernateAllowed = isHibernateAllowed.Invoke();
@@ -164,7 +174,7 @@ namespace DLLStuff
                 if (hModule != IntPtr.Zero)
                 {
                     FreeLibrary(hModule);
-                    Console.WriteLine($"{DateTime.Now.ToString()} library {dllName} was unloaded");
+                    Console.WriteLine($"{DateTime.Now.ToString()} library {dllLoadPath} was unloaded");
                 };
                 Console.WriteLine($"{DateTime.Now.ToString()} DLLStuff completed normally");
             }
