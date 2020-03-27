@@ -3,6 +3,7 @@ using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Blob;
 using Newtonsoft.Json.Linq;
 using System;
+using System.Collections;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
@@ -65,13 +66,13 @@ namespace DLLStuff
                 Console.WriteLine();
                 if (!string.IsNullOrEmpty(dllNameInBlobStorage))
                 {
-                    var currentColour = Console.ForegroundColor;
-                    Console.ForegroundColor = ConsoleColor.Yellow;
                     Console.WriteLine($"There is apparently a dll in {inboundContainerName}. I'll deal with that later!");
-                    Console.ForegroundColor = currentColour;
                     downloadDll = true;
 
                 }
+                // Environment logging
+                WriteEnvironmentData();
+
                 // Some stuff with blob storage
                 CloudBlobClient blobClient;
                 CloudBlobContainer inboundContainer;
@@ -139,6 +140,7 @@ namespace DLLStuff
                             Console.WriteLine($"Name={fileInfo.Name}, length={fileInfo.Length}");
                         }
                         dllLoadPath = dllFileName;
+                                           
                     }
                     catch (Exception e)
                     {
@@ -146,7 +148,10 @@ namespace DLLStuff
                     }
                 }
 
-
+                var currentColour = Console.ForegroundColor;
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"DLL Load path is {dllLoadPath}");
+                Console.ForegroundColor = currentColour;
                 // call a function in the DLL
                 IntPtr hModule = LoadLibrary(dllLoadPath);
                 if (hModule == IntPtr.Zero)
@@ -183,9 +188,87 @@ namespace DLLStuff
                 Console.WriteLine($"Error {e.Message}");
 
             }
+            try
+            {
+                Console.WriteLine("Press Enter to continue");
+                Console.ReadLine();
+            }
+            catch (Exception) { }
 
 
+        }
 
+        private static void WriteEnvironmentData()
+        {
+            string str;
+            string nl = Environment.NewLine;
+            //
+            Console.WriteLine("*************************************************************************************************************");
+            Console.WriteLine("-- Environment members --");
+
+            //  Invoke this sample with an arbitrary set of command line arguments.
+            Console.WriteLine("CommandLine: {0}", Environment.CommandLine);
+
+            string[] arguments = Environment.GetCommandLineArgs();
+            Console.WriteLine("GetCommandLineArgs: {0}", String.Join(", ", arguments));
+
+            //  <-- Keep this information secure! -->
+            Console.WriteLine("CurrentDirectory: {0}", Environment.CurrentDirectory);
+
+            Console.WriteLine("ExitCode: {0}", Environment.ExitCode);
+
+            Console.WriteLine("HasShutdownStarted: {0}", Environment.HasShutdownStarted);
+
+            //  <-- Keep this information secure! -->
+            Console.WriteLine("MachineName: {0}", Environment.MachineName);
+
+            Console.WriteLine("NewLine: {0}  first line{0}  second line{0}  third line",
+                                  Environment.NewLine);
+
+            Console.WriteLine("OSVersion: {0}", Environment.OSVersion.ToString());
+
+            Console.WriteLine("StackTrace: '{0}'", Environment.StackTrace);
+
+            //  <-- Keep this information secure! -->
+            Console.WriteLine("SystemDirectory: {0}", Environment.SystemDirectory);
+
+            Console.WriteLine("TickCount: {0}", Environment.TickCount);
+
+            //  <-- Keep this information secure! -->
+            Console.WriteLine("UserDomainName: {0}", Environment.UserDomainName);
+
+            Console.WriteLine("UserInteractive: {0}", Environment.UserInteractive);
+
+            //  <-- Keep this information secure! -->
+            Console.WriteLine("UserName: {0}", Environment.UserName);
+
+            Console.WriteLine("Version: {0}", Environment.Version.ToString());
+
+            Console.WriteLine("WorkingSet: {0}", Environment.WorkingSet);
+
+            //  No example for Exit(exitCode) because doing so would terminate this example.
+
+            //  <-- Keep this information secure! -->
+            string query = "My system drive is %SystemDrive% and my system root is %SystemRoot%";
+            str = Environment.ExpandEnvironmentVariables(query);
+            Console.WriteLine("ExpandEnvironmentVariables: {0}  {1}", nl, str);
+
+            Console.WriteLine("GetEnvironmentVariable: {0}  My temporary directory is {1}.", nl,
+                                   Environment.GetEnvironmentVariable("TEMP"));
+
+            Console.WriteLine("GetEnvironmentVariables: ");
+            IDictionary environmentVariables = Environment.GetEnvironmentVariables();
+            foreach (DictionaryEntry de in environmentVariables)
+            {
+                Console.WriteLine("  {0} = {1}", de.Key, de.Value);
+            }
+
+            Console.WriteLine("GetFolderPath: {0}",
+                         Environment.GetFolderPath(Environment.SpecialFolder.System));
+
+            string[] drives = Environment.GetLogicalDrives();
+            Console.WriteLine("GetLogicalDrives: {0}", String.Join(", ", drives));
+            Console.WriteLine("*************************************************************************************************************");
         }
     }
 }
