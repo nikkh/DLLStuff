@@ -5,8 +5,8 @@
     "OutboundContainer": "dllstuff-outbound",
     "OutboundBlobPrefix": "dllstuff-",
     "OutboundBlobSuffix": ".json",
-    "DLLName": "c:\\Windows\\System32\\powrprof.dll",
-    "FunctionName": "IsPwrHibernateAllowed",
-    "DllNameInBlobStorage": "powrprof.dll"
+    "DLLName": "C:\\Users\\nhill\\source\\repos\\MathLibrary\\Debug\\MathLibrary.dll",
+    "FunctionName": "get_string",
+    "DllNameInBlobStorage": "MathLibrary.dll"
   }
 }

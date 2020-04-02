@@ -26,8 +26,15 @@ namespace DLLStuff
         #endregion
 
         #region delegates
-        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
         delegate bool IsHibernateAllowed();
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate IntPtr NicksIntFunction();
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate IntPtr NicksStringFunction();
+
         #endregion
 
         static async Task Main(string[] args)
@@ -169,11 +176,16 @@ namespace DLLStuff
                 }
                 Console.WriteLine($"{DateTime.Now.ToString()} function {functionName} found in library {dllLoadPath} address={funcaddr}");
 
-                IsHibernateAllowed isHibernateAllowed = Marshal.GetDelegateForFunctionPointer(funcaddr, typeof(IsHibernateAllowed)) as IsHibernateAllowed;
-                bool hibernateAllowed = isHibernateAllowed.Invoke();
-                Console.WriteLine($"{DateTime.Now.ToString()} function {functionName} executed sucessfully!");
-                if (hibernateAllowed) Console.WriteLine($"{DateTime.Now.ToString()} Hibernate Allowed!");
-                else Console.WriteLine($"{DateTime.Now.ToString()} Hibernate NOT Allowed!");
+                //IsHibernateAllowed isHibernateAllowed = Marshal.GetDelegateForFunctionPointer(funcaddr, typeof(IsHibernateAllowed)) as IsHibernateAllowed;
+                //bool hibernateAllowed = isHibernateAllowed.Invoke();
+                //Console.WriteLine($"{DateTime.Now.ToString()} function {functionName} executed sucessfully!");
+                //if (hibernateAllowed) Console.WriteLine($"{DateTime.Now.ToString()} Hibernate Allowed!");
+                //else Console.WriteLine($"{DateTime.Now.ToString()} Hibernate NOT Allowed!");
+
+                NicksStringFunction stringFunction = Marshal.GetDelegateForFunctionPointer<NicksStringFunction>(funcaddr) as NicksStringFunction;
+                IntPtr stringResultPtr = stringFunction();
+                string stringResult = Marshal.PtrToStringBSTR(stringResultPtr);
+                Console.WriteLine($"{DateTime.Now.ToString()} function {functionName} returned \"{stringResult}\"");
 
 
                 if (hModule != IntPtr.Zero)
