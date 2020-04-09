@@ -39,9 +39,10 @@ namespace DLLStuff
 
         static async Task Main(string[] args)
         {
-            Console.WriteLine($"{DateTime.Now.ToString()} Welcome to Nick's DLL Experiments");
+            Console.WriteLine($"{DateTime.Now.ToString()} Welcome to Nick's DLL Experiments...");
             bool downloadDll = false;
             string dllLoadPath = "";
+            Console.WriteLine($"Current Directory: {Directory.GetCurrentDirectory()}");
             var configBuilder = new ConfigurationBuilder()
                .SetBasePath(Directory.GetCurrentDirectory())
                .AddJsonFile("local.settings.json", optional: true, reloadOnChange: true)
@@ -78,7 +79,7 @@ namespace DLLStuff
 
                 }
                 // Environment logging
-                WriteEnvironmentData();
+                // WriteEnvironmentData();
 
                 // Some stuff with blob storage
                 CloudBlobClient blobClient;

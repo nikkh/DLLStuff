@@ -341,3 +341,7 @@ healthchecksdb
 /DLLStuff/local.settings.json
 /DLLStuff/Properties/launchSettings.json
 /DLLStuff/dll/powrprof.dll
+/docker-compose.dcproj
+/docker-compose.override.yml
+/docker-compose.yml
+/Dockerfile
