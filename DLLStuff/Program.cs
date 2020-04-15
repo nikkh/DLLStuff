@@ -1,17 +1,26 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using CalculationRequest.Models;
+using Microsoft.Azure.ServiceBus;
+using Microsoft.Extensions.Configuration;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Blob;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace DLLStuff
 {
     class Program
     {
+        static IQueueClient queueClient;
+        static bool shutdownRequested = false;
+        static string storageConnectionString;
+
         #region Win32 APIs
         [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern IntPtr LoadLibrary(string libname);
@@ -26,189 +35,238 @@ namespace DLLStuff
         #endregion
 
         #region delegates
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        delegate bool IsHibernateAllowed();
-
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate IntPtr NicksIntFunction();
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate IntPtr NicksIntFunction(IntPtr numPointer);
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
         private delegate IntPtr NicksStringFunction();
 
         #endregion
 
+        static async Task ProcessMessagesAsync(Message message, CancellationToken token)
+        {
+            var body = Encoding.UTF8.GetString(message.Body);
+            ConsoleWriteInColour($"Received message: SequenceNumber:{message.SystemProperties.SequenceNumber} Body:{body}", ConsoleColor.Green);
+            var crm = JsonConvert.DeserializeObject<CalculationRequestMessage>(body);
+            if (crm.MessageType == MessageType.QuitMessage)
+            {
+                ConsoleWriteInColour($"Quit Message was received at {DateTime.Now.ToShortTimeString()}", ConsoleColor.Green);
+                shutdownRequested = true;
+            }
+            else
+            {
+                await ProcessCalculationRequest(crm);
+            }
+            await queueClient.CompleteAsync(message.SystemProperties.LockToken);
+        }
+
+        public static void ConsoleWriteInColour(String message, ConsoleColor colour = ConsoleColor.Gray)
+        {
+            var oldColor = Console.ForegroundColor;
+            Console.ForegroundColor = colour;
+            Console.WriteLine(message);
+            Console.ForegroundColor = oldColor;
+        }
+
+
+        private static async Task ProcessCalculationRequest(CalculationRequestMessage crm)
+        {
+            var calculationResponseMessage = new CalculationResponseMessage(crm);
+            Console.WriteLine($"ProcessingCalculationRequest at {DateTime.Now.ToShortTimeString()}");
+            Console.WriteLine($"Request: {crm}");
+            Console.WriteLine($"Current Directory: {Directory.GetCurrentDirectory()}");
+            if (ValidateCalculationRequestMessage(crm))
+            {
+                calculationResponseMessage.CalculationRequestStatus = CalculationRequestStatus.InProgress;
+            }
+           
+            ConsoleWriteInColour($"Downloading DLL...{crm.DllName} from container {crm.ContainerName}", ConsoleColor.Green);
+            string dllFileName;
+            var storageAccount = CloudStorageAccount.Parse(storageConnectionString);
+            CloudBlobClient blobClient = storageAccount.CreateCloudBlobClient();
+            CloudBlobContainer container = blobClient.GetContainerReference(crm.ContainerName);
+            try
+            {
+                Console.WriteLine($"Current directory={Directory.GetCurrentDirectory()}");
+                var directoryToCreate = $"{Directory.GetCurrentDirectory()}\\dll";
+                Directory.CreateDirectory(directoryToCreate);
+                Console.WriteLine($"directory {directoryToCreate} was created");
+                dllFileName = $"{directoryToCreate}\\{crm.DllName}";
+
+                var dllBlob = container.GetBlockBlobReference(crm.DllName);
+                await dllBlob.FetchAttributesAsync();
+                Console.WriteLine($"Blob {crm.DllName} in container {crm.ContainerName} is {dllBlob.Properties.Length} bytes");
+                var memoryStream = new MemoryStream();
+                await dllBlob.DownloadToStreamAsync(memoryStream);
+                using (memoryStream)
+                {
+                    var fileStream = File.Create(dllFileName);
+                    memoryStream.Position = 0;
+                    memoryStream.CopyTo(fileStream);
+                    fileStream.Close();
+                }
+                Console.WriteLine($"{crm.DllName} was downloaded to local file system {directoryToCreate}");
+                Console.WriteLine($"Directrory Listing:");
+                var files = Directory.GetFiles(directoryToCreate);
+                foreach (var fileName in files)
+                {
+                    var fileInfo = new FileInfo($"{fileName}");
+                    Console.WriteLine($"Name={fileInfo.Name}, length={fileInfo.Length}");
+                }
+            }
+            catch (Exception e)
+            {
+                throw new Exception($"Error downloading DLL {crm.DllName} from container {crm.ContainerName}.  Message:{e.Message}", e);
+            }
+            IntPtr hModule = IntPtr.Zero;
+            try
+            {
+                ConsoleWriteInColour($"DLL Load path is {dllFileName}", ConsoleColor.Green);
+                // call a function in the DLL
+                hModule = LoadLibrary(dllFileName);
+                if (hModule == IntPtr.Zero)
+                {
+                    int errorCode = Marshal.GetLastWin32Error();
+                    throw new Exception($"Failed to load library {dllFileName} (ErrorCode: {errorCode})");
+                }
+                ConsoleWriteInColour($"{DateTime.Now.ToString()} library {dllFileName} was loaded sucessfully. hModule={hModule}", ConsoleColor.Yellow);
+
+                IntPtr funcaddr = GetProcAddress(hModule, crm.FunctionName);
+                if (funcaddr == IntPtr.Zero)
+                {
+                    int errorCode = Marshal.GetLastWin32Error();
+                    throw new Exception($"Failed to find function {crm.FunctionName} (ErrorCode: {errorCode})");
+                }
+                ConsoleWriteInColour($"{DateTime.Now.ToString()} function {crm.FunctionName} found in library {dllFileName} address={funcaddr}", ConsoleColor.Yellow);
+
+                if (crm.FunctionType == FunctionType.StringFunction)
+                {
+                    NicksStringFunction stringFunction = Marshal.GetDelegateForFunctionPointer<NicksStringFunction>(funcaddr) as NicksStringFunction;
+                    IntPtr stringResultPtr = stringFunction();
+                    string stringResult = Marshal.PtrToStringBSTR(stringResultPtr);
+                    ConsoleWriteInColour($"{DateTime.Now.ToString()} function {crm.FunctionName} returned \"{stringResult}\"", ConsoleColor.Cyan);
+                    calculationResponseMessage.CalculationRequestStatus = CalculationRequestStatus.Succeeded;
+                    calculationResponseMessage.Result = stringResult;
+                }
+
+                if (crm.FunctionType == FunctionType.IntFunction)
+                {
+                    if (Int32.TryParse(crm.Parameters[0], out Int32 number))
+                    {
+                
+                        IntPtr numPointer = new IntPtr(number);
+                        NicksIntFunction intFunction = Marshal.GetDelegateForFunctionPointer<NicksIntFunction>(funcaddr) as NicksIntFunction;
+                        IntPtr intResultPtr = intFunction(numPointer);
+                        Int32 intResult = intResultPtr.ToInt32();
+                        ConsoleWriteInColour($"{DateTime.Now.ToString()} function {crm.FunctionName} returned \"{intResult}\"", ConsoleColor.Cyan);
+                        calculationResponseMessage.CalculationRequestStatus = CalculationRequestStatus.Succeeded;
+                        calculationResponseMessage.Result = intResult.ToString();
+                    }
+                    else
+                    {
+                        ConsoleWriteInColour($"{DateTime.Now.ToString()} function {crm.FunctionName} no parameters supplied for function", ConsoleColor.Red);
+                    }
+                }
+
+                
+                Console.WriteLine($"{DateTime.Now.ToString()} DLLStuff completed normally");
+            }
+            catch (Exception e) 
+            {
+               throw new Exception($"Error loading and executing function {crm.FunctionName} from DLL {crm.DllName}.  Message:{e.Message}", e);
+            }
+            finally
+            {
+                if (hModule != IntPtr.Zero)
+                {
+                    FreeLibrary(hModule);
+                    ConsoleWriteInColour($"{DateTime.Now.ToString()} library {dllFileName} was unloaded", ConsoleColor.Yellow);
+                };
+            }
+            // Now serialize the result object to blob storage
+            try
+            {
+                var resultsBlob = container.GetBlockBlobReference($"{crm.RequestId}.json");
+                var results = JsonConvert.SerializeObject(calculationResponseMessage);
+                await resultsBlob.UploadTextAsync(results);
+            }
+            catch(Exception e)
+            {
+                throw new Exception($"Error uploading results to blob storage.  Function {crm.FunctionName} in DLL {crm.DllName} was called sucessfully.  Message:{e.Message}", e);
+            }
+
+        }
+
+        private static bool ValidateCalculationRequestMessage(CalculationRequestMessage crm)
+        {
+            if (String.IsNullOrEmpty(crm.RequestId)) throw new Exception("RequestId cannot be null or empty");
+            if (String.IsNullOrEmpty(crm.FunctionName)) throw new Exception("Function Name cannot be null or empty");
+            if (String.IsNullOrEmpty(crm.DllName)) throw new Exception("Dll Name cannot be null or empty");
+            if (String.IsNullOrEmpty(crm.ContainerName)) throw new Exception("Container Name cannot be null or empty");
+            return true;
+        }
+
+        static Task ExceptionReceivedHandler(ExceptionReceivedEventArgs exceptionReceivedEventArgs)
+        {
+            Console.WriteLine($"Message handler encountered an exception {exceptionReceivedEventArgs.Exception}.");
+            var context = exceptionReceivedEventArgs.ExceptionReceivedContext;
+            Console.WriteLine("Exception context for troubleshooting:");
+            Console.WriteLine($"- Endpoint: {context.Endpoint}");
+            Console.WriteLine($"- Entity Path: {context.EntityPath}");
+            Console.WriteLine($"- Executing Action: {context.Action}");
+            return Task.CompletedTask;
+        }
+
         static async Task Main(string[] args)
         {
-            Console.WriteLine($"{DateTime.Now.ToString()} Welcome to Nick's DLL Experiments...");
-            bool downloadDll = false;
-            string dllLoadPath = "";
-            Console.WriteLine($"Current Directory: {Directory.GetCurrentDirectory()}");
+            ConsoleWriteInColour($"{DateTime.Now.ToString()} Welcome to Nick's DLL Experiments...", ConsoleColor.Green);
             var configBuilder = new ConfigurationBuilder()
                .SetBasePath(Directory.GetCurrentDirectory())
                .AddJsonFile("local.settings.json", optional: true, reloadOnChange: true)
                .AddJsonFile("settings.json", optional: true, reloadOnChange: true)
                .AddEnvironmentVariables();
+
             IConfiguration configuration = configBuilder.Build();
+            string serviceBusConnectionString = "";
+            string serviceBusQueueName = "";
+            
             try
             {
-                var storageConnectionString = configuration["StorageConnectionString"];
-                var inboundContainerName = configuration["RunContext:InboundContainer"];
-                var outboundContainerName = configuration["RunContext:OutboundContainer"];
-                var dllName = configuration["RunContext:DLLName"];
-                dllLoadPath = dllName;
-                var functionName = configuration["RunContext:FunctionName"];
-                var inboundBlobName = configuration["RunContext:InboundBlobName"];
-                var outboundBlobPrefix = configuration["RunContext:OutboundBlobPrefix"];
-                var outboundBlobSuffix = configuration["RunContext:OutboundBlobSuffix"];
-                var dllNameInBlobStorage = configuration["RunContext:DllNameInBlobStorage"];
-                Console.WriteLine("Configuration:");
-                Console.WriteLine($"storage connection string startswith={storageConnectionString.Substring(0, 30)}");
-                Console.WriteLine($"inbound container={inboundContainerName}");
-                Console.WriteLine($"inbound blob name ={inboundBlobName}");
-                Console.WriteLine($"outbound container={outboundContainerName}");
-                Console.WriteLine($"outbound blob prefix={outboundBlobPrefix}");
-                Console.WriteLine($"outbound blob suffix={outboundBlobSuffix}");
-                Console.WriteLine();
-                Console.WriteLine($"dll name={dllName}");
-                Console.WriteLine($"function name={functionName}");
-                Console.WriteLine();
-                if (!string.IsNullOrEmpty(dllNameInBlobStorage))
-                {
-                    Console.WriteLine($"There is apparently a dll in {inboundContainerName}. I'll deal with that later!");
-                    downloadDll = true;
-
-                }
-                // Environment logging
-                // WriteEnvironmentData();
-
-                // Some stuff with blob storage
-                CloudBlobClient blobClient;
-                CloudBlobContainer inboundContainer;
-                try
-                {
-                    var storageAccount = CloudStorageAccount.Parse(storageConnectionString);
-                    blobClient = storageAccount.CreateCloudBlobClient();
-                    inboundContainer = blobClient.GetContainerReference(inboundContainerName);
-                    var inboundBlob = inboundContainer.GetBlockBlobReference(inboundBlobName);
-                    var inboundBlobContents = await inboundBlob.DownloadTextAsync();
-                    var jo = JObject.Parse(inboundBlobContents);
-                    // pull the blob SAS Url just for something to do
-                    var blobSasUrl = jo["BlobSasUrl"].ToString();
-                    JObject body = new JObject(
-                        new JProperty("DateTime", DateTime.Now.ToString()),
-                        new JProperty("BlobSasStuff",
-                            new JObject(
-                                new JProperty("BlobSasUrl", blobSasUrl),
-                                new JProperty("MeaninglessGuid", Guid.NewGuid().ToString())
-                            )
-                        ),
-                    new JProperty("LastThing", "test"));
-
-                    string outboundBlobName = $"{outboundBlobPrefix}{DateTime.Now.Ticks}{outboundBlobSuffix}";
-                    var outboundContainer = blobClient.GetContainerReference(outboundContainerName);
-                    var outboundBlob = outboundContainer.GetBlockBlobReference(outboundBlobName);
-                    var outboundBlobContents = body.ToString();
-                    await outboundBlob.UploadTextAsync(outboundBlobContents);
-                }
-                catch(Exception e)
-                {
-                    throw new Exception($"Error processing blob storage {e.Message}", e);
-                }
-
-                // some stuff with local storage
-                if (downloadDll)
-                {
-                    Console.WriteLine($"Downloading DLL...");
-                    string dllFileName;
-                    try
-                    {
-                        Console.WriteLine($"Current directory={Directory.GetCurrentDirectory()}");
-                        var directoryToCreate = $"{Directory.GetCurrentDirectory()}\\dll";
-                        Directory.CreateDirectory(directoryToCreate);
-                        Console.WriteLine($"directory {directoryToCreate} was created");
-                        dllFileName = $"{directoryToCreate}\\{dllNameInBlobStorage}";
-                        var dllBlob = inboundContainer.GetBlockBlobReference(dllNameInBlobStorage);
-                        await dllBlob.FetchAttributesAsync();
-                        Console.WriteLine($"Blob {dllNameInBlobStorage} in container {inboundContainerName} is {dllBlob.Properties.Length} bytes");
-                        var memoryStream = new MemoryStream();
-                        await dllBlob.DownloadToStreamAsync(memoryStream);
-                        using (memoryStream)
-                        {
-                            var fileStream = File.Create(dllFileName);
-                            memoryStream.Position = 0;
-                            memoryStream.CopyTo(fileStream);
-                            fileStream.Close();
-                        }
-                        Console.WriteLine($"{dllNameInBlobStorage} was downloaded to local file system {directoryToCreate}");
-                        Console.WriteLine($"Directrory Listing:");
-                        var files = Directory.GetFiles(directoryToCreate);
-                        foreach (var fileName in files)
-                        {
-                            var fileInfo = new FileInfo($"{fileName}");
-                            Console.WriteLine($"Name={fileInfo.Name}, length={fileInfo.Length}");
-                        }
-                        dllLoadPath = dllFileName;
-                                           
-                    }
-                    catch (Exception e)
-                    {
-                        throw new Exception($"Error processing local storage {e.Message}", e);
-                    }
-                }
-
-                var currentColour = Console.ForegroundColor;
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine($"DLL Load path is {dllLoadPath}");
-                Console.ForegroundColor = currentColour;
-                // call a function in the DLL
-                IntPtr hModule = LoadLibrary(dllLoadPath);
-                if (hModule == IntPtr.Zero)
-                {
-                    int errorCode = Marshal.GetLastWin32Error();
-                    throw new Exception($"Failed to load library {dllLoadPath} (ErrorCode: {errorCode})");
-                }
-                Console.WriteLine($"{DateTime.Now.ToString()} library {dllLoadPath} was loaded sucessfully. hModule={hModule}");
-
-                IntPtr funcaddr = GetProcAddress(hModule, functionName);
-                if (funcaddr == IntPtr.Zero)
-                {
-                    int errorCode = Marshal.GetLastWin32Error();
-                    throw new Exception($"Failed to find function {functionName} (ErrorCode: {errorCode})");
-                }
-                Console.WriteLine($"{DateTime.Now.ToString()} function {functionName} found in library {dllLoadPath} address={funcaddr}");
-
-                //IsHibernateAllowed isHibernateAllowed = Marshal.GetDelegateForFunctionPointer(funcaddr, typeof(IsHibernateAllowed)) as IsHibernateAllowed;
-                //bool hibernateAllowed = isHibernateAllowed.Invoke();
-                //Console.WriteLine($"{DateTime.Now.ToString()} function {functionName} executed sucessfully!");
-                //if (hibernateAllowed) Console.WriteLine($"{DateTime.Now.ToString()} Hibernate Allowed!");
-                //else Console.WriteLine($"{DateTime.Now.ToString()} Hibernate NOT Allowed!");
-
-                NicksStringFunction stringFunction = Marshal.GetDelegateForFunctionPointer<NicksStringFunction>(funcaddr) as NicksStringFunction;
-                IntPtr stringResultPtr = stringFunction();
-                string stringResult = Marshal.PtrToStringBSTR(stringResultPtr);
-                Console.WriteLine($"{DateTime.Now.ToString()} function {functionName} returned \"{stringResult}\"");
-
-
-                if (hModule != IntPtr.Zero)
-                {
-                    FreeLibrary(hModule);
-                    Console.WriteLine($"{DateTime.Now.ToString()} library {dllLoadPath} was unloaded");
-                };
-                Console.WriteLine($"{DateTime.Now.ToString()} DLLStuff completed normally");
+                storageConnectionString = configuration["StorageConnectionString"];
+                serviceBusConnectionString = configuration["ServiceBusConnectionString"];
+                serviceBusQueueName = configuration["ServiceBusQueueName"];
             }
             catch (Exception e)
             {
-                Console.WriteLine($"Error {e.Message}");
-
+                ConsoleWriteInColour($"Exception caught while accessing configuration: {e.Message}", ConsoleColor.Red);
+                return;
             }
             try
             {
-                Console.WriteLine("Press Enter to continue");
-                Console.ReadLine();
+                queueClient = new QueueClient(serviceBusConnectionString, serviceBusQueueName);
+                var messageHandlerOptions = new MessageHandlerOptions(ExceptionReceivedHandler)
+                {
+                    MaxConcurrentCalls = 1,
+                    AutoComplete = false
+                };
+                queueClient.RegisterMessageHandler(ProcessMessagesAsync, messageHandlerOptions);
+                while (!shutdownRequested)
+                {
+                    Console.WriteLine($"{DateTime.Now.ToString()} - Waiting for messages on queue {serviceBusQueueName}");
+                    Thread.Sleep(15000);
+                }
             }
-            catch (Exception) { }
+            catch (Exception e)
+            {
+                ConsoleWriteInColour($"Exception caught while registering message handler: {e.Message}", ConsoleColor.Red);
+                return;
+            }
+            finally
+            {
+                await queueClient.CloseAsync();
+            }
 
-
+            return;
         }
 
         private static void WriteEnvironmentData()

@@ -345,3 +345,4 @@ healthchecksdb
 /docker-compose.override.yml
 /docker-compose.yml
 /Dockerfile
+/RequestCreator/local.settings.json
