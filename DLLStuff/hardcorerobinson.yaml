@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hardcorerobinson-deployment
+  labels:
+    app: hardcorerobinson-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hardcorerobinson
+  template:
+    metadata:
+      labels:
+        app: hardcorerobinson
+    spec:
+      nodeSelector:
+        "beta.kubernetes.io/os": windows
+      containers:
+      - name: hardcorerobinson
+        image: dllstuffacr.azurecr.io/dllstuff:hardcore_robinson
+        command:
+        - DLLStuff.exe
+      restartPolicy: Always
+
