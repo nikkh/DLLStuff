@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hopefulwescoff-deployment
+  labels:
+    app: hopefulwescoff-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hopefulwescoff
+  template:
+    metadata:
+      labels:
+        app: hopefulwescoff
+    spec:
+      nodeSelector:
+        "beta.kubernetes.io/os": windows
+      containers:
+      - name: hopefulwescoff
+        image: dllstuffacr.azurecr.io/dllstuff:hopeful-wescoff
+        command:
+        - DLLStuff.exe
+      restartPolicy: Always
+
