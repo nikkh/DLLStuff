@@ -139,8 +139,6 @@ Due to the above problem with ACI, I decided to deploy to AKS.  Here are the com
 ## Deploy your application to your AKS Cluster
 * az aks get-credentials --resource-group winakstest --name myAKSCluster
 * kubectl apply -f hardcorerobinson.yaml
-* kubectl get pods
-* kubectl logs hardcorerobinson-deployment-d66c95d87-jrk78
 
 the yaml file I used looks like this:
 
@@ -170,6 +168,10 @@ spec:
       restartPolicy: Always
 
 And I have checked it in [here](https://github.com/nikkh/DLLStuff/blob/master/DLLStuff/hardcorerobinson.yaml)
+
+You can check the status of your deplyment using `kubectl get pods` you will see the container being pulled and then iit will be running. Once its running send some messages using the RequestCreator application (see above) and trace what is happening using `kubectl logs <pod_name>`
+
+![screenshot of AKS logs](docs/AKS-logs.jpg)
 
 ## Summary
 
