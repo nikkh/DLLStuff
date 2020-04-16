@@ -169,7 +169,7 @@ namespace DLLStuff
                 }
 
                 
-                Console.WriteLine($"{DateTime.Now.ToString()} DLLStuff completed normally");
+                Console.WriteLine($"{DateTime.Now.ToString()} request {crm.RequestId} was processed successfully.");
             }
             catch (Exception e) 
             {
