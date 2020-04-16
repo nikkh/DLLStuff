@@ -98,7 +98,7 @@ Since the whole point of the activity is to check dynamic loading of 32-bit DLLs
 
 * docker pull mcr.microsoft.com/dotnet/framework/runtime:4.8-windowsservercore-ltsc2019
 * docker run --entrypoint powershell.exe -v C:\Users\nhill\source\repos\DLLStuff\:c:\data -it  mcr.microsoft.com/dotnet/framework/runtime:4.8-windowsservercore-ltsc2019
-* PS C:\data\dllstuff\bin\debug\net4.6.1> copy *.* C:\
+* PS C:\data\dllstuff\bin\debug\net4.6.1> copy &ast;.&ast; C:\
 * PS Exit
 * docker ps -a
 * docker stop hardcore_robinson
@@ -109,7 +109,7 @@ Since the whole point of the activity is to check dynamic loading of 32-bit DLLs
 
 What I'm essentially doing here is pulling an image that is both supported on Azure Container Instances, and also has the right components installed to run a .NET framework application.  I think start a container from that image - mapping the folder with my DLLStuff application to c:\data in the container.  I access the container with powershell.  I copy the application (and all its dependencies) into the container, then quit.
 
-Then I look for all docker containers, and find the one I just accesssed.  I then stop and commit that container and tag it with its docker generated name. Then, I run the application in the container to make sure it works, and push to my Azure Container Registry (you will need to create this, enable admin user and note the password (you will be asked to enter your credentials).
+Then I look for all docker containers, and find the one I just accesssed.  I then stop and commit that container and tag it with its docker generated name. Then, I run the application in the container to make sure it works, and push to my Azure Container Registry (you will need to create this, enable admin user and note the password - you will be asked to enter your credentials).
 
 ## Deploy to ACI
 
@@ -117,9 +117,9 @@ Then I look for all docker containers, and find the one I just accesssed.  I the
 
 `az container create --resource-group dllstuff  --name hardcore-robinson  --image dllstuffacr.azurecr.io/dllstuff:hardcore_robinson  --os-type windows --environment-variables 'StorageConnectionString'='DefaultEndpointsProtocol=https...<redacted>' 'ServiceBusConnectionString'='DefaultEndpointsProtocol=https...<redacted>' --command-line "DLLStuff.exe" --restart-policy OnFailure --no-wait`
 
-You container will restart repeatedly, but you wont be able to access it.  In order to create an ACI you can access (and run DLLStuff.exe manually) you can use: `--command-line "ping -t localhost" `
+You container will restart repeatedly, but you wont be able to access it.  In order to create an ACI you can access (and then attempt torun DLLStuff.exe manually) you can use: `--command-line "ping -t localhost" `.  Currently if you do this it will silently fail.
 
-## Create a windows supporting AKS cluster
+## Create an AKS cluster with support for Windows
 Due to the above problem with ACI, I decided to deploy to AKS.  Here are the commands to create a windows capable AKS cluster:
 
 * az extension add --name aks-preview
@@ -172,3 +172,5 @@ spec:
 And I have checked it in [here](https://github.com/nikkh/DLLStuff/blob/master/DLLStuff/hardcorerobinson.yaml)
 
 ## Summary
+
+It is indeed possible to run an application that dynamically loads and unmanaged DLL in a container on Azure.  At present DLLStuff runs indefinitely (until you send a QuitMessage via RequestCreator).  This would incur charges even when it isnt doing anything.  Ideally, I would like to have the service bus message monitored by an azure function which starts an ACI instance on request, but I cant do this right now.
