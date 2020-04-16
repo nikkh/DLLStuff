@@ -173,6 +173,11 @@ You can check the status of your deplyment using `kubectl get pods` you will see
 
 ![screenshot of AKS logs](docs/AKS-logs.jpg)
 
+In addition a blob with the calculation results will be written to the storage account you created for each run.  The blob name will be the RequestID.json (RequestId is written to std out by RequestCreator.exe)
+
+![screenshot of blob storage](docs/blob-storage.jpg)
+
+
 ## Summary
 
 It is indeed possible to run an application that dynamically loads and unmanaged DLL in a container on Azure.  At present DLLStuff runs indefinitely (until you send a QuitMessage via RequestCreator).  This would incur charges even when it isnt doing anything.  Ideally, I would like to have the service bus message monitored by an azure function which starts an ACI instance on request, but I cant do this right now.
