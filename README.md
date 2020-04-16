@@ -15,7 +15,7 @@ This repo contains everything you need to get you own example up and running...
 
 ## Introduction
 
-I haven't fully autmoated the deployment of this (I dont think enough people will want o try it to warrant that).  The remainder of this page should give you enough pointers to deploy it if you want to.
+I haven't fully automated the deployment of this (I dont think enough people will want o try it to warrant that).  The remainder of this page should give you enough pointers to deploy it if you want to.
 
 ## Building the application
 
@@ -115,7 +115,7 @@ Then I look for all docker containers, and find the one I just accesssed.  I the
 
 > At the time of writing the DLLStuff.exe wont run in ACI.  It just fails silently.  This is because of [this KB](https://support.microsoft.com/en-sg/help/4542617/you-might-encounter-issues-when-using-windows-server-containers-with-t).  There's nothing you can do to work around this really, but it should be resolved imminently.
 
-`az container create --resource-group dllstuff  --name hardcore-robinson  --image dllstuffacr.azurecr.io/dllstuff:hardcore_robinson  --os-type windows --environment-variables 'StorageConnectionString'='DefaultEndpointsProtocol=https...<redacted>' 'ServiceBusConnectionString'='DefaultEndpointsProtocol=https...<redacted>' --command-line "DLLStuff.exe" --restart-policy OnFailure --no-wait`
+`az container create --resource-group dllstuff  --name hardcore-robinson  --image dllstuffacr.azurecr.io/dllstuff:hardcore_robinson  --os-type windows --command-line "DLLStuff.exe" --restart-policy OnFailure --no-wait`
 
 You container will restart repeatedly, but you wont be able to access it.  In order to create an ACI you can access (and then attempt torun DLLStuff.exe manually) you can use: `--command-line "ping -t localhost" `.  Currently if you do this it will silently fail.
 
