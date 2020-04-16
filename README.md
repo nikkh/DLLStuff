@@ -26,7 +26,7 @@ Clone/fork this repo and open the solution in Visual Studio (2019).  Ensure that
 In your azure subscription:
 * create a storage account with a container to hold inputs and results.  Note the connection string and container name
 * create a service bus namespace and a queue within the namespace. Note the connection string and the queue name
-* Add a file called local.settings.json in DLLStuff and ReqestCreator projects
+* Add a file called local.settings.json in DLLStuff and RequestCreator projects
 
 `{
   "Logging": {
@@ -35,14 +35,14 @@ In your azure subscription:
     }
   },
   "StorageConnectionString": "",
-  "ServiceBusConnectionString": "",
-  "ServiceBusQueueName": "calculation-queue"`
+  "ServiceBusConnectionString": ""`
   
 *ensure this file is excluded from source control and copied to the output directory on build*
 
-* In settings.json in the RequestCreator project configure the container name you created above
+* In settings.json in the RequestCreator project configure the container and queue that you created above
 `{
-  "ContainerName": "dllstuff"
+  "ContainerName": "dllstuff",
+  "ServiceBusQueueName": "calculation-queue"
 }`
 
 Upload the two native 32-bit DLLs (DLLStuff\dll?) that I developed for this exercise from your local drive to the container you created above.
@@ -90,8 +90,85 @@ If you now run the DLLStuff project, you should see your messages being processe
 
 ![screenshot of DLLStuff output](docs/DLLStuff-output.jpg)
   
-## Creating the Azure Infrastructure
 ## Creating a container
+
+You will need [Docker Desktop](https://hub.docker.com/editions/community/docker-ce-desktop-windows?tab=description) installed for this.
+
+Since the whole point of the activity is to check dynamic loading of 32-bit DLLs running in containers in Azure, then the next step is to create a container. (A dockerfile would be pretty easy for this, but I wanted to do everyhting manually so I'd understand any pitfalls.  Consequently I have been creating my container using the following steps:
+
+docker pull mcr.microsoft.com/dotnet/framework/runtime:4.8-windowsservercore-ltsc2019
+docker run --entrypoint powershell.exe -v C:\Users\nhill\source\repos\DLLStuff\:c:\data -it  mcr.microsoft.com/dotnet/framework/runtime:4.8-windowsservercore-ltsc2019
+PS C:\data\dllstuff\bin\debug\net4.6.1> copy *.* C:\
+PS Exit
+docker ps -a
+docker stop hardcore_robinson
+docker commit hardcore_robinson dllstuff:hardcore_robinson
+docker run --entrypoint dllstuff.exe -it  dllstuff:hardcore_robinson
+docker tag dllstuff:hardcore_robinson dllstuffacr.azurecr.io/dllstuff:hardcore_robinson
+docker push dllstuffacr.azurecr.io/dllstuff:hardcore_robinson
+
+What I'm essentially doing here is pulling an image that is both supported on Azure Container Instances, and also has the right components installed to run a .NET framework application.  I think start a container from that image - mapping the folder with my DLLStuff application to c:\data in the container.  I access the container with powershell.  I copy the application (and all its dependencies) into the container, then quit.
+
+Then I look for all docker containers, and find the one I just accesssed.  I then stop and commit that container and tag it with its docker generated name. Then, I run the application in the container to make sure it works, and push to my Azure Container Registry (you will need to create this, enable admin user and note the password (you will be asked to enter your credentials).
+
 ## Deploy to ACI
-## Deploy to AKS
+
+> At the time of writing the DLLStuff.exe wont run in ACI.  It just fails silently.  This is because of [this KB](https://support.microsoft.com/en-sg/help/4542617/you-might-encounter-issues-when-using-windows-server-containers-with-t).  There's nothing you can do to work around this really, but it should be resolved imminently.
+
+`az container create --resource-group dllstuff  --name hardcore-robinson  --image dllstuffacr.azurecr.io/dllstuff:hardcore_robinson  --os-type windows --environment-variables 'StorageConnectionString'='DefaultEndpointsProtocol=https...<redacted>' 'ServiceBusConnectionString'='DefaultEndpointsProtocol=https...<redacted>' --command-line "DLLStuff.exe" --restart-policy OnFailure --no-wait`
+
+You container will restart repeatedly, but you wont be able to access it.  In order to create an ACI you can access (and run DLLStuff.exe manually) you can use: `--command-line "ping -t localhost" `
+
+## Create a windows supporting AKS cluster
+Due to the above problem with ACI, I decided to deploy to AKS.  Here are the commands to create a windows capable AKS cluster:
+
+az extension add --name aks-preview
+az extension update --name aks-preview
+az feature register --name WindowsPreview --namespace Microsoft.ContainerService
+az feature list -o table --query "[?contains(name, 'Microsoft.ContainerService/WindowsPreview')].{Name:name,State:properties.state}"
+*You need to wait for completion here*
+
+az provider register --namespace Microsoft.ContainerService
+az group create --name winakstest --location eastus
+PASSWORD_WIN="<redacted>"
+az aks create     --resource-group winakstest     --name myAKSCluster     --node-count 2     --enable-addons monitoring     --kubernetes-version 1.15.7     --generate-ssh-keys     --windows-admin-password $PASSWORD_WIN     --windows-admin-username azureuser     --vm-set-type VirtualMachineScaleSets     --load-balancer-sku standard     --network-plugin azure
+az aks nodepool add     --resource-group winakstest     --cluster-name myAKSCluster     --os-type Windows     --name npwin     --node-count 1     --kubernetes-version 1.15.7
+*link your azure container registry to your cluster*
+az aks update -n myAKSCluster -g winakstest --attach-acr dllstuffacr
+
+## Deploy your application to your AKS Cluster
+az aks get-credentials --resource-group winakstest --name myAKSCluster
+kubectl apply -f hardcorerobinson.yaml
+kubectl get pods
+kubectl logs hardcorerobinson-deployment-d66c95d87-jrk78
+
+the yaml file I used looks like this:
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hardcorerobinson-deployment
+  labels:
+    app: hardcorerobinson-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hardcorerobinson
+  template:
+    metadata:
+      labels:
+        app: hardcorerobinson
+    spec:
+      nodeSelector:
+        "beta.kubernetes.io/os": windows
+      containers:
+      - name: hardcorerobinson
+        image: dllstuffacr.azurecr.io/dllstuff:hardcore_robinson
+        command:
+        - DLLStuff.exe
+      restartPolicy: Always
+
+And I have checked it in [here](https://github.com/nikkh/DLLStuff/blob/master/DLLStuff/hardcorerobinson.yaml)
+
 ## Summary
