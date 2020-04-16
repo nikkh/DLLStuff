@@ -13,4 +13,11 @@ The answer to all the questions above is a resounding **YES**, but unfortunately
 
 This repo contains everything you need to get you own example up and running...
 
-## Getting Started
+## Introduction
+## Building the application
+## Creating Infrastructure
+## Running locally
+## Creating a container
+## Deploy to ACI
+## Deploy to AKS
+## Summary
